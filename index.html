@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Customer Map</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    html, body, #map { height:100%; margin:0; }
+    .legend { background:#fff; padding:8px 10px; border-radius:4px; }
+    .legend div { margin-bottom:4px; }
+    .legend span { display:inline-block; width:12px; height:12px; margin-right:6px; vertical-align:middle; }
+    .header { position:absolute; top:10px; left:10px; z-index:1000; background:#fff; padding:6px 10px; border-radius:4px; font-weight:600; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div class="header" id="title"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // ---- CONFIG: your Apps Script Web App base URL (no query at the end) ----
+    const DATA_BASE_URL = "https://script.google.com/macros/s/AKfycbwHDG19oBzcFBxAg1XU3sEZOyW8f0bRt17V5f-WOZb0n-I2FYlopnh5xwc3LhZtvKtB/exec";
+
+    // Read ?customer=... from this page's URL
+    const params = new URLSearchParams(location.search);
+    const CUSTOMER = (params.get('customer') || '').trim();
+
+    // Build the data URL
+    const DATA_URL = CUSTOMER
+      ? `${DATA_BASE_URL}?customer=${encodeURIComponent(CUSTOMER)}`
+      : DATA_BASE_URL;
+
+    // Map
+    const map = L.map('map').setView([51.3,10.2], 6);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom:18, attribution:'&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Color helpers (single customer page = single primary color)
+    const primaryColor = '#1f77b4'; // you can swap to a per-customer palette later
+    function styleFeature(f) {
+      const p = f.properties || {};
+      const type = (p.type || '').toLowerCase();
+      const status = (p.status || '').toLowerCase().trim();
+
+      if (type === 'grid') {
+        // semi-transparent overlay
+        return { color: primaryColor, weight: 2, opacity: 0.35 };
+      }
+      // routes
+      if (status === 'complete')   return { color: primaryColor, weight: 3, opacity: 0.95 };
+      if (status === 'incomplete') return { color: '#ff7f0e',   weight: 3, opacity: 0.95 }; // orange for planned
+      return { color: '#999999', weight: 3, opacity: 0.6 }; // unknown
+    }
+
+    function onEachFeature(f, layer) {
+      const p = f.properties || {};
+      const name  = p.name || p.filename || 'Feature';
+      const status = p.type === 'route' ? (p.status || '–') : '–';
+      const km = (p.type === 'route' && p.dist_km != null) ? p.dist_km : 'n/a';
+      const type = p.type || '–';
+      const customer = p.customer || CUSTOMER || '–';
+
+      layer.bindPopup(
+        `<b>${name}</b><br>` +
+        `<b>Type:</b> ${type}<br>` +
+        (type==='route' ? `<b>Status:</b> ${status}<br>` : '') +
+        (type==='route' ? `<b>Distance:</b> ${km} km<br>` : '') +
+        `<b>Customer:</b> ${customer}`
+      );
+    }
+
+    // Legend
+    const legend = L.control({ position:'bottomleft' });
+    legend.onAdd = () => {
+      const div = L.DomUtil.create('div', 'legend');
+      div.innerHTML =
+        `<div><span style="background:${primaryColor}"></span>Completed route</div>` +
+        `<div><span style="background:#ff7f0e"></span>Planned route</div>` +
+        `<div><span style="background:rgba(31,119,180,0.35)"></span>Grid overlay</div>` +
+        `<div><span style="background:#999999"></span>Unknown</div>`;
+      return div;
+    };
+    legend.addTo(map);
+
+    // Title
+    document.getElementById('title').textContent = CUSTOMER ? `Customer: ${CUSTOMER}` : 'All Customers';
+
+    // Load filtered data
+    fetch(DATA_URL + '&t=' + Date.now())
+      .then(r => r.json())
+      .then(geojson => {
+        const layer = L.geoJSON(geojson, { style: styleFeature, onEachFeature }).addTo(map);
+        if (layer.getLayers().length > 0) {
+          map.fitBounds(layer.getBounds(), { padding:[20,20] });
+        }
+      })
+      .catch(err => console.error('GeoJSON load error:', err));
+  </script>
+</body>
+</html>
